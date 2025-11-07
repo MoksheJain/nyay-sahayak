@@ -125,7 +125,7 @@ const Message: React.FC<{ message: Message }> = ({ message }) => {
                   className="flex items-center p-2 bg-gray-200 rounded-lg text-xs hover:bg-gray-300 transition-colors"
                 >
                   <FileText className="w-3 h-3 mr-1 text-gray-500" />
-                  <span className="truncate font-medium text-gray-700">
+                  <span className="truncate font-medium text-black">
                     {source.title && source.title !== "N/A"
                       ? source.title
                       : source.file}
