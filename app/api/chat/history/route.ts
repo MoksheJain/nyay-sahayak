@@ -16,8 +16,8 @@ export async function GET(request: NextRequest) {
         // 1. Connect to the database
         await connectToMongo();
 
-        const { email } = await request.json();
-        const userEmail: string = email.toLowerCase();
+        const { searchParams } = new URL(request.url);
+        const userEmail = searchParams.get('email');
         const conversations: Pick<IConversationDocument, '_id' | 'start_time' | 'last_updated'>[] = await Conversation.find({ user_email: userEmail })
             .sort({ last_updated: -1 }) // Sort by most recent
             .select('_id start_time last_updated');
