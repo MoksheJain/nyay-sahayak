@@ -30,14 +30,16 @@ import {
   ListOrdered,
 } from "lucide-react";
 import { WorldMapDemo } from "@/components/world-map";
+
+// --- Configuration ---
+const BACKEND_BASE_URL = "http://172.20.10.14:5000";
+
 // Assuming these are locally defined components or Tailwind wrappers
-// If these components were provided, they would need to be included or mocked.
 const DottedGlowBackground = () => (
   <div className="p-16 text-center text-gray-500">
     Select a tool to begin your legal workflow.
   </div>
 );
-
 
 // --- Data Structures ---
 
@@ -57,14 +59,26 @@ interface CRPCResponse {
   sources: Source[];
 }
 
-// Paragraph Analysis Structure (for PDF query/highlight)
+// *** MODIFICATION 1: Update ParagraphAnalysis structure for the new JSON ***
 interface ParagraphAnalysis {
-  classification: "Standard" | "Non-standard";
-  confidence: number;
-  paragraph: string;
-  top_category: string;
-  top_clauses_count: number;
+  clause: string;
+  explanation: string;
+  exploit_level: "Standard" | "Negotiable" | "Exploitable";
+  index: number;
+  lawyer_questions: string[];
 }
+
+// NEW INTERFACE for Query PDF Response
+interface ContractQueryResponse {
+  answer: string;
+  query: string;
+  session_id: string;
+  top_paragraphs: Array<{
+    paragraph: string;
+    similarity: number;
+  }>;
+}
+// *** END MODIFICATION 1 ***
 
 // Contract Form Field Structure
 interface ContractField {
@@ -74,7 +88,7 @@ interface ContractField {
   isCustom: boolean;
 }
 
-// --- Mock Data ---
+// --- Mock Data (Kept for CRPC/initial view) ---
 
 const mockCRPCResponse: CRPCResponse = {
   query: "What is the procedure for granting anticipatory bail under CRPC?",
@@ -100,41 +114,50 @@ const mockCRPCResponse: CRPCResponse = {
   ],
 };
 
+// *** MODIFICATION 2: Mock data now only used for initial UI component test, but will be replaced by API calls ***
+// The structure is kept consistent with the new ParagraphAnalysis interface
 const mockAnalysisResponse: ParagraphAnalysis[] = [
   {
-    classification: "Standard",
-    confidence: 0.87,
-    paragraph:
+    clause:
       "1. The Company shall pay the Consultant $500 per hour for services rendered, with a monthly cap of 20 hours.",
-    top_category: "Volume Restriction",
-    top_clauses_count: 5,
+    explanation:
+      "This clause sets a clear hourly rate and monthly cap for the consultant's services. However, the cap of 20 hours per month may be negotiable depending on the scope and requirements of the project. The consultant may be able to negotiate a higher cap or a different payment structure. The hourly rate of $500 may also be subject to negotiation based on the consultant's expertise and the market rate. It is essential to consider the project's overall budget and the consultant's expected workload when evaluating this clause.",
+    exploit_level: "Negotiable",
+    index: 1,
+    lawyer_questions: [
+      "What is the basis for the hourly rate of $500?",
+      "Are there any exceptions to the monthly cap of 20 hours?",
+      "How will the consultant's hours be tracked and verified?",
+    ],
   },
   {
-    classification: "Standard",
-    confidence: 0.837,
-    paragraph:
+    clause:
       "2. The term of this Agreement shall commence on January 1, 2025 and continue for one year.",
-    top_category: "Expiration Date",
-    top_clauses_count: 5,
+    explanation:
+      "This clause establishes the start date and duration of the agreement. The commencement date is specific, and the term is set for one year, providing clarity on the agreement's duration. This is a standard clause in most contracts, and its terms are generally not subject to negotiation. However, it is crucial to ensure that the start date and term align with the project's timeline and the parties' expectations.",
+    exploit_level: "Standard",
+    index: 2,
+    lawyer_questions: [
+      "What happens if the project is completed before the end of the term?",
+      "Are there any options for renewing or extending the agreement?",
+      "How will the agreement be terminated at the end of the term?",
+    ],
   },
   {
-    classification: "Standard",
-    confidence: 0.87,
-    paragraph:
+    clause:
       "3. Either party may terminate this Agreement at any time with 30 days’ written notice.",
-    top_category: "Termination For Convenience",
-    top_clauses_count: 5,
-  },
-  {
-    classification: "Non-standard",
-    confidence: 0.486,
-    paragraph:
-      "4. Consultant shall submit monthly progress reports to the Project Manager detailing all tasks completed.",
-    top_category: "Post-Termination Services",
-    top_clauses_count: 5,
+    explanation:
+      "This clause allows either party to terminate the agreement with 30 days' written notice. This could potentially be exploitable, as it does not provide any protection for the consultant if the company decides to terminate the agreement without cause. The consultant may want to negotiate a more extensive notice period or a termination fee to mitigate the risks. Additionally, the clause does not specify the grounds for termination, which could lead to disputes.",
+    exploit_level: "Exploitable",
+    index: 3,
+    lawyer_questions: [
+      "What are the grounds for termination without cause?",
+      "Can the notice period be extended or shortened?",
+      "Are there any penalties for early termination?",
+    ],
   },
 ];
-
+// Mock contract text is now only used for fallback/initial view but API response is preferred.
 const mockContractText: string = `CONSULTING SERVICES AGREEMENT
 
 This Consulting Services Agreement ("Agreement") is entered into on this 1st day of January, 2025, by and between:
@@ -161,6 +184,7 @@ Party A (Company) Signature
 
 _________________________
 Party B (Consultant) Signature`;
+// *** END MODIFICATION 2 ***
 
 // --- Type Definitions for Modes ---
 
@@ -207,7 +231,6 @@ const LEGAL_TOOL_OPTIONS: ToolOption[] = [
 
 // --- Sub-Components ---
 
-// ... (SidebarItem, SourceAttribution, AnalysisResult remain the same) ...
 interface SidebarItemProps {
   icon: any;
   label: string;
@@ -277,60 +300,159 @@ const SourceAttribution: FC<{ sources: Source[] }> = ({ sources }) => {
   );
 };
 
-// Paragraph Analysis Component (for PDF query/highlight modes)
+// Component to display the analysis for HIGHLIGHT_PDF mode
 const AnalysisResult: FC<{ analysis: ParagraphAnalysis[] }> = ({
   analysis,
-}) => (
-  <div className="bg-white p-6 rounded-xl shadow-lg mt-8">
-    <h3 className="text-xl font-bold mb-4 text-gray-800 flex items-center">
-      <Gavel className="w-5 h-5 mr-2 text-indigo-600" />
-      Contract Analysis Summary
-    </h3>
-    <div className="space-y-4">
-      {analysis.map((item, index) => (
-        <div
-          key={index}
-          className={`p-4 rounded-lg border-l-4 ${
-            item.classification === "Non-standard"
-              ? "bg-yellow-50 border-yellow-500"
-              : "bg-green-50 border-green-500"
-          } shadow-sm`}
-        >
-          <div className="flex justify-between items-start mb-2">
-            <span
-              className={`text-xs font-bold px-2 py-1 rounded-full ${
-                item.classification === "Non-standard"
-                  ? "bg-yellow-500 text-white"
-                  : "bg-green-500 text-white"
-              }`}
+}) => {
+  // Helper to determine color based on exploit_level
+  const getColorClasses = (level: ParagraphAnalysis["exploit_level"]) => {
+    switch (level) {
+      case "Exploitable":
+        return {
+          bg: "bg-red-50 border-red-500",
+          tagBg: "bg-red-500 text-white",
+          text: "text-red-700",
+        };
+      case "Negotiable":
+        return {
+          bg: "bg-yellow-50 border-yellow-500",
+          tagBg: "bg-yellow-500 text-white",
+          text: "text-yellow-700",
+        };
+      case "Standard":
+      default:
+        return {
+          bg: "bg-green-50 border-green-500",
+          tagBg: "bg-green-500 text-white",
+          text: "text-green-700",
+        };
+    }
+  };
+
+  const totalExploitable = analysis.filter(
+    (a) => a.exploit_level === "Exploitable"
+  ).length;
+  const totalNegotiable = analysis.filter(
+    (a) => a.exploit_level === "Negotiable"
+  ).length;
+
+  return (
+    <div className="bg-white p-6 rounded-xl shadow-lg mt-8">
+      <h3 className="text-xl font-bold mb-4 text-gray-800 flex items-center">
+        <AlertTriangle className="w-5 h-5 mr-2 text-indigo-600" />
+        Contract Vulnerability Analysis
+      </h3>
+      <div className="space-y-6">
+        {analysis.map((item) => {
+          const colors = getColorClasses(item.exploit_level);
+          return (
+            <div
+              key={item.index}
+              className={`p-4 rounded-lg border-l-4 ${colors.bg} shadow-md`}
             >
-              {item.classification}
-            </span>
-            <span className="text-xs text-gray-600">
-              Confidence: {(item.confidence * 100).toFixed(1)}%
-            </span>
-          </div>
-          <p className="text-sm font-medium text-gray-800 mb-2">
-            {item.paragraph}
-          </p>
-          <p className="text-xs text-gray-600">
-            **Category:** {item.top_category}
-            <span className="ml-4">
-              **Related Clauses:** {item.top_clauses_count}
-            </span>
+              <div className="flex justify-between items-start mb-2">
+                <div className="flex items-center space-x-2">
+                  <span
+                    className={`text-xs font-bold px-3 py-1 rounded-full ${colors.tagBg} capitalize`}
+                  >
+                    {item.exploit_level}
+                  </span>
+                  <span className="text-sm font-semibold text-gray-800">
+                    Clause {item.index}
+                  </span>
+                </div>
+              </div>
+
+              {/* Clause Text */}
+              <p className="text-sm font-medium text-gray-900 italic mb-3">
+                "{item.clause}"
+              </p>
+
+              {/* Explanation / Reasoning */}
+              <h4 className="text-xs font-bold uppercase text-gray-700 mb-1">
+                AI Explanation:
+              </h4>
+              <p className="text-sm text-gray-600 mb-4">{item.explanation}</p>
+
+              {/* Lawyer Questions */}
+              {item.lawyer_questions && item.lawyer_questions.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-bold uppercase text-gray-700 mb-1 flex items-center">
+                    <Gavel className="w-4 h-4 mr-1 text-indigo-500" />
+                    Key Questions for Your Lawyer:
+                  </h4>
+                  <ul className="list-disc pl-5 space-y-1 text-sm text-gray-600">
+                    {item.lawyer_questions.map((q, qIndex) => (
+                      <li key={qIndex}>{q}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-6 p-4 border-t border-gray-200 text-center text-sm text-gray-600 bg-gray-50 rounded-lg">
+        Analysis complete. The model identified:
+        <p className="font-bold mt-1">
+          <span className="text-red-600">{totalExploitable} Exploitable</span>,
+          <span className="text-yellow-600"> {totalNegotiable} Negotiable</span>
+          , and
+          <span>
+            {" "}
+            {analysis.length - totalExploitable - totalNegotiable} Standard
+          </span>{" "}
+          clauses.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// Component to display the answer for QUERY_PDF mode
+const QueryResult: FC<{ response: ContractQueryResponse }> = ({ response }) => {
+  return (
+    <div className="bg-white p-6 rounded-xl shadow-lg mt-8">
+      <h3 className="text-xl font-bold mb-4 text-gray-800 flex items-center">
+        <Search className="w-5 h-5 mr-2 text-indigo-600" />
+        Contract Query Result
+      </h3>
+      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+        <p className="text-sm font-semibold text-gray-700 mb-2">
+          <span className="font-bold text-indigo-600">Your Query:</span>{" "}
+          {response.query}
+        </p>
+        <div className="bg-white p-4 rounded-lg shadow-md">
+          <h4 className="text-sm font-bold uppercase text-gray-700 mb-1">
+            AI Answer:
+          </h4>
+          <p className="text-base text-gray-800 whitespace-pre-wrap">
+            {response.answer}
           </p>
         </div>
-      ))}
-    </div>
-    <div className="mt-4 text-center text-sm text-gray-500">
-      Analysis complete. The model identified{" "}
-      {analysis.filter((a) => a.classification === "Non-standard").length}{" "}
-      potential non-standard clauses.
-    </div>
-  </div>
-);
+      </div>
 
-// ... (CRPCPanel and PDFContractPanel remain the same) ...
+      <div className="mt-4">
+        <h4 className="text-xs font-semibold uppercase text-gray-600 mb-2">
+          Supporting Paragraphs
+        </h4>
+        <div className="space-y-2">
+          {response.top_paragraphs.map((item, index) => (
+            <div
+              key={index}
+              className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg"
+            >
+              <p className="text-xs text-gray-700 italic">"{item.paragraph}"</p>
+              <span className="text-[10px] text-indigo-600 font-medium">
+                Similarity: {item.similarity.toFixed(4)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const CRPCPanel: FC = () => {
   const [response, setResponse] = useState<CRPCResponse | null>(null);
@@ -340,7 +462,7 @@ const CRPCPanel: FC = () => {
   const handleQuery = () => {
     if (!input.trim()) return;
     setIsLoading(true);
-    // Simulate API call
+    // Simulate API call (This mode remains mock for now as no CRPC endpoint was provided)
     setTimeout(() => {
       setResponse(mockCRPCResponse);
       setIsLoading(false);
@@ -410,27 +532,72 @@ const PDFContractPanel: FC<{ mode: "query" | "highlight" }> = ({ mode }) => {
   const [file, setFile] = useState<File | null>(null);
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  // Separate state for analysis (highlight) and query result
   const [analysis, setAnalysis] = useState<ParagraphAnalysis[] | null>(null);
+  const [queryResult, setQueryResult] = useState<ContractQueryResponse | null>(
+    null
+  );
 
   const isQueryMode = mode === "query";
 
-  const handleProcess = () => {
+  const handleProcess = async () => {
     if (!file) return;
     if (isQueryMode && !query.trim()) return;
 
     setIsLoading(true);
     setAnalysis(null);
+    setQueryResult(null);
 
-    // Simulate PDF analysis/query API call
-    setTimeout(() => {
-      setAnalysis(mockAnalysisResponse);
+    const formData = new FormData();
+    formData.append("file", file);
+
+    let url = "";
+
+    if (isQueryMode) {
+      url = `${BACKEND_BASE_URL}/upload-query-pdf`;
+      formData.append("query", query);
+      formData.append("top_k", "5"); // Defaulting to top_k=5 based on mock
+    } else {
+      url = `${BACKEND_BASE_URL}/analyze-exploit`;
+    }
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (isQueryMode) {
+        // Handle upload-query-pdf response
+        setQueryResult(data as ContractQueryResponse);
+      } else {
+        // Handle analyze-exploit response
+        // Note: The backend returns { "exploit_analysis": [...] }
+        setAnalysis(data.exploit_analysis as ParagraphAnalysis[]);
+      }
+    } catch (error) {
+      console.error("Error processing contract:", error);
+      // Optional: Add user-facing error message here
+      alert(
+        `Failed to process contract. Please check console for details. Error: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    } finally {
       setIsLoading(false);
-    }, 2000);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFile(e.target.files ? e.target.files[0] : null);
     setAnalysis(null); // Reset results on new file upload
+    setQueryResult(null); // Reset query results too
   };
 
   return (
@@ -501,8 +668,12 @@ const PDFContractPanel: FC<{ mode: "query" | "highlight" }> = ({ mode }) => {
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0 pt-4">
-        {analysis && <AnalysisResult analysis={analysis} />}
-        {!analysis && !isLoading && (
+        {/* Render Analysis Result for HIGHLIGHT_PDF */}
+        {analysis && !isQueryMode && <AnalysisResult analysis={analysis} />}
+        {/* Render Query Result for QUERY_PDF */}
+        {queryResult && isQueryMode && <QueryResult response={queryResult} />}
+
+        {!analysis && !queryResult && !isLoading && (
           <div className="text-center text-gray-500 pt-10">
             Upload a PDF contract and click the button to start the analysis.
           </div>
@@ -563,18 +734,13 @@ const ContractDraftView: FC<{
       </body>
       </html>
     `;
-
-    // Open a new window, write the content, and trigger the print dialog
     const printWindow = window.open("", "_blank");
     if (printWindow) {
       printWindow.document.write(htmlContent);
       printWindow.document.close();
       printWindow.focus();
-      // Wait a moment for the content to render before printing
       setTimeout(() => {
         printWindow.print();
-        // Since the user is expected to save as PDF, closing the window immediately
-        // might interrupt the process. We leave it open for user action.
       }, 300);
     }
   };
@@ -748,27 +914,32 @@ const ContractModal: FC<{ onClose: () => void }> = ({ onClose }) => {
     },
     {
       id: 2,
-      title: "Party A",
+      title: "Party A (Client)",
       description: "Hare Krishna (Company Name)",
       isCustom: false,
     },
     {
       id: 3,
-      title: "Party B",
+      title: "Party B (Consultant)",
       description: "Yojit (Consultant Name)",
       isCustom: false,
     },
-    { id: 4, title: "Payment", description: "$500/hour", isCustom: false },
-    { id: 5, title: "Duration", description: "1 year", isCustom: false },
+    {
+      id: 4,
+      title: "Payment Terms",
+      description: "$500/hour",
+      isCustom: false,
+    },
+    { id: 5, title: "Duration/Term", description: "1 year", isCustom: false },
     {
       id: 6,
-      title: "Confidentiality",
+      title: "Confidentiality Period",
       description: "5 years post-termination",
       isCustom: false,
     },
     {
       id: 7,
-      title: "Dispute Resolution",
+      title: "Dispute Resolution Method",
       description: "Arbitration in Delhi",
       isCustom: false,
     },
@@ -814,14 +985,76 @@ const ContractModal: FC<{ onClose: () => void }> = ({ onClose }) => {
     setFields((prev) => prev.filter((field) => field.id !== id));
   };
 
-  const handleGenerateContract = () => {
+  const handleGenerateContract = async () => {
     setIsGenerating(true);
-    // Simulate LLM call. In a real application, you'd send the fields to the LLM.
-    setTimeout(() => {
-      // Use the global mock contract text for the draft
-      setGeneratedContractText(mockContractText);
+
+    // 1. Construct the payload from the state fields
+    const payload = {
+      contract_type: fields.find((f) => f.title.includes("Contract Type"))
+        ?.description,
+      parties: {
+        party_a: fields
+          .find((f) => f.title.includes("Party A"))
+          ?.description.split(" (")[0],
+        party_b: fields
+          .find((f) => f.title.includes("Party B"))
+          ?.description.split(" (")[0],
+      },
+      terms: {
+        payment: fields.find((f) => f.title.includes("Payment Terms"))
+          ?.description,
+        duration: fields.find((f) => f.title.includes("Duration/Term"))
+          ?.description,
+        confidentiality: fields.find((f) =>
+          f.title.includes("Confidentiality Period")
+        )?.description,
+        dispute: fields.find((f) => f.title.includes("Dispute Resolution"))
+          ?.description,
+      },
+    };
+
+    // Include any custom fields in the 'terms' for flexibility
+    fields
+      .filter((f) => f.isCustom)
+      .forEach((f) => {
+        // Simple key sanitization
+        const key = f.title.toLowerCase().replace(/[^a-z0-9]/g, "_");
+        payload.terms = {
+          ...payload.terms,
+          [key]: f.description,
+        };
+      });
+
+    try {
+      // 2. Call the API
+      const response = await fetch(
+        `${BACKEND_BASE_URL}/generate-contract-pdf`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // 3. Update state with the generated contract text
+      setGeneratedContractText(data.contract_text);
+    } catch (error) {
+      console.error("Error generating contract:", error);
+      alert(
+        `Failed to generate contract. Error: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    } finally {
       setIsGenerating(false);
-    }, 2000);
+    }
   };
 
   // Handler to go back to the field editor from the draft view
@@ -1135,15 +1368,6 @@ const LegalDashboard: FC = () => {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col p-8 overflow-y-auto min-w-0">
-        {/* <header className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">
-            A whole world of legalities,
-          </h1>
-          <div className="h-10 w-10 bg-indigo-200 rounded-full flex items-center justify-center text-indigo-800 font-semibold shadow-md">
-            RK
-          </div>
-        </header> */}
-
         {/* Conditional View Rendering */}
         <div className="flex-1 flex flex-col min-h-0">
           {/* 1. Initial Grid View */}
