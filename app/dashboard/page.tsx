@@ -19,7 +19,6 @@ import {
   Send,
   Loader2,
   CheckCircle,
-  // New Imports for Editing/Download
   Bold,
   Italic,
   Underline,
@@ -34,16 +33,12 @@ import { WorldMapDemo } from "@/components/world-map";
 // --- Configuration ---
 const BACKEND_BASE_URL = "http://172.20.10.14:5000";
 
-// Assuming these are locally defined components or Tailwind wrappers
 const DottedGlowBackground = () => (
   <div className="p-16 text-center text-gray-500">
     Select a tool to begin your legal workflow.
   </div>
 );
 
-// --- Data Structures ---
-
-// Updated Source structure based on user request for CRPC response
 interface Source {
   pdf_name: string;
   link_to_pdf: string;
